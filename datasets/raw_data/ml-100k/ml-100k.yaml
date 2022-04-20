@@ -1,0 +1,16 @@
+data_dir: dataset/raw/ml-100k
+user_id_field: &u user_id:token
+item_id_field: &i item_id:token
+rating_field: &r rating:float
+time_field: &t timestamp:float
+inter_feat_name: ml-100k.inter
+inter_feat_field: [*u, *i, *r, *t]
+user_feat_field: [[*u, age:token, gender:token, occupation:token]]
+item_feat_field: [[*i, movie_title:token_seq, release_year:token, class:token_seq]]
+field_separator: "\t"
+seq_separator: " " 
+min_user_inter: 10
+min_item_inter: 10
+field_max_len: ~
+rating_threshold: ~
+drop_low_rating: ~
