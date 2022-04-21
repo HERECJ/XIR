@@ -1,7 +1,7 @@
 import logging, os, datetime, time
 from framework.dataloader import RatMixData, UserHisData, UserTestData, pad_collate_valid
 from framework.model import TowerModel, MFModel
-from framework.debias1 import Base_Debias, Pop_Debias, RePop_Debias, RePop_Debias_pop, RePop_Debias_uni
+from framework.debias1 import Base_Debias, Pop_Debias, RePop_Debias, RePop_Debias_pop, RePop_Debias_uni, MixDebias
 import framework.eval as eval
 import numpy as np
 import torch
@@ -145,42 +145,67 @@ class Trainer:
         out = dict(zip(metrics, out))
         return out
 
-    def _train_step(self, user_id, item_id, model:TowerModel, debias:Base_Debias):
-        """
-            Support not resample based method
-        """
-        # TODO : item features (optional)
+    # def _train_step(self, user_id, item_id, model:TowerModel, debias:Base_Debias):
+    #     """
+    #         Support not resample based method
+    #     """
+    #     # TODO : item features (optional)
+    #     query = model.construct_query(user_id)
+    #     item_emb = model.item_encoder(item_id)
+
+
+    #     # generate the index matrix of items
+    #     B = user_id.shape[0]
+    #     if self.config['sample_from_batch']:
+    #         sample_size = self.config['sample_size']
+    #         assert sample_size > 1 and sample_size<B, ValueError('The number of samples must be greater than 1 and smaller than batch_size')
+    #         # Actually, 'replacement=True'
+    #         IndM = torch.randint(B, size=(B,sample_size), device=self.device)  # B x S
+    #     else:
+    #         IndM = torch.arange(B, device=self.device).view(1,-1).repeat(B,1)  # B x B
+        
+    #     neg_items = item_id[IndM]
+    #     # neg_items_emb = item_emb[IndM]
+
+    #     log_pos_prob, log_neg_prob = debias(item_id), debias(neg_items)
+
+
+    #     scores = torch.matmul(query, item_emb.T)
+    #     # neg_items = item_id[IndM]
+    #     ##### training step
+    #     pos_rat = torch.diag(scores)
+    #     neg_rat = torch.gather(scores, 1, IndM)
+
+    #     ##### training step
+    #     # pos_rat = model.scorer(query, item_emb)
+    #     # neg_rat = model.scorer(query, neg_items_emb) 
+    #     loss = model.loss(pos_rat, log_pos_prob, neg_rat, log_neg_prob)
+    #     return loss
+    
+    def _train_step(self, user_id, item_id, model:TowerModel, debias: Base_Debias):
         query = model.construct_query(user_id)
         item_emb = model.item_encoder(item_id)
-
-
-        # generate the index matrix of items
         B = user_id.shape[0]
+
+        scores = torch.matmul(query, item_emb.T)
+        log_pos_prob = debias(item_id)
+        pos_rat = torch.diag(scores)
+
         if self.config['sample_from_batch']:
             sample_size = self.config['sample_size']
             assert sample_size > 1 and sample_size<B, ValueError('The number of samples must be greater than 1 and smaller than batch_size')
             # Actually, 'replacement=True'
-            IndM = torch.randint(B, size=(B,sample_size), device=self.device)  # B x S
+            IndM = torch.randint(B, size=(B,sample_size), device=self.device)
+            log_neg_prob = log_pos_prob[IndM]
+            neg_rat = torch.gather(scores, 1, IndM)
         else:
-            IndM = torch.arange(B, device=self.device).view(1,-1).repeat(B,1)  # B x B
+            log_neg_prob = log_pos_prob.view(1, -1).repeat(B, 1)
+            neg_rat = scores
         
-        neg_items = item_id[IndM]
-        # neg_items_emb = item_emb[IndM]
-
-        log_pos_prob, log_neg_prob = debias(item_id), debias(neg_items)
-
-
-        scores = torch.matmul(query, item_emb.T)
-        # neg_items = item_id[IndM]
-        ##### training step
-        pos_rat = torch.diag(scores)
-        neg_rat = torch.gather(scores, 1, IndM)
-
-        ##### training step
-        # pos_rat = model.scorer(query, item_emb)
-        # neg_rat = model.scorer(query, neg_items_emb) 
         loss = model.loss(pos_rat, log_pos_prob, neg_rat, log_neg_prob)
         return loss
+
+
 
 
     def _fit(self, model:TowerModel, debias:Base_Debias, train_loader:DataLoader, test_loader=None):
@@ -205,8 +230,10 @@ class Trainer:
 
                 loss = self._train_step(user_id, item_id, model, debias)
 
-                loss_ += loss.item()
+                # loss_ += loss.item()
+                
                 loss.backward()
+                loss_ += loss.detach()
                 optimizer.step()
 
             if self.config['steprl'] :
@@ -254,6 +281,9 @@ class Trainer:
         elif self.config['debias'] == 5:
             pop_count = train_mat.sum(axis=0).A.squeeze()
             debias_module = RePop_Debias_uni(pop_count, self.device)
+        elif self.config['debias'] == 6:
+            pop_count = train_mat.sum(axis=0).A.squeeze()
+            debias_module = MixDebias(pop_count, self.device)
         else:
              raise NotImplementedError
         
@@ -315,5 +345,64 @@ class Trainer_Resample(Trainer):
         ##### training step
         pos_rat = torch.diag(scores)
         neg_rat = torch.gather(scores, 1, IndM)
+        loss = model.loss(pos_rat, log_pos_prob, neg_rat, log_neg_prob)
+        return loss
+
+class Trainer_Mix(Trainer):
+    def __init__(self, config):
+        super().__init__(config)
+    
+    def _train_step(self, user_id, item_id, model: TowerModel, debias: Base_Debias):
+        query = model.construct_query(user_id)
+        item_emb = model.item_encoder(item_id)
+
+        # Uniformly sample items
+        # B = user_id.shape[0]
+        sample_size = self.config['sample_size']
+        mixed_items = torch.randint(self.item_num, size=( sample_size,), device=self.device)
+
+        mixed_item_emb = model.item_encoder(mixed_items)
+
+        log_pop_prob, log_uni_prob = debias(item_id, mixed_items)
+
+
+        pop_scores = torch.matmul(query, item_emb.T)
+        uni_scores = torch.matmul(query, mixed_item_emb.T)
+
+        pos_rat = torch.diag(pop_scores)
+        neg_rat = torch.cat([pop_scores, uni_scores], dim=-1)
+
+        log_pos_prob = log_pop_prob
+        log_neg_prob = torch.cat([log_pop_prob, log_uni_prob], dim=-1)
+        loss = model.loss(pos_rat, log_pos_prob, neg_rat, log_neg_prob)
+        return loss
+
+
+class Trainer_Mix(Trainer):
+    def __init__(self, config):
+        super().__init__(config)
+    
+    def _train_step(self, user_id, item_id, model: TowerModel, debias: Base_Debias):
+        query = model.construct_query(user_id)
+        item_emb = model.item_encoder(item_id)
+
+        # Uniformly sample items
+        # B = user_id.shape[0]
+        sample_size = self.config['sample_size']
+        mixed_items = torch.randint(self.item_num, size=( sample_size,), device=self.device)
+
+        mixed_item_emb = model.item_encoder(mixed_items)
+
+        log_pop_prob, log_uni_prob = debias(item_id, mixed_items)
+
+
+        pop_scores = torch.matmul(query, item_emb.T)
+        uni_scores = torch.matmul(query, mixed_item_emb.T)
+
+        pos_rat = torch.diag(pop_scores)
+        neg_rat = torch.cat([pop_scores, uni_scores], dim=-1)
+
+        log_pos_prob = log_pop_prob
+        log_neg_prob = torch.cat([log_pop_prob, log_uni_prob], dim=-1)
         loss = model.loss(pos_rat, log_pos_prob, neg_rat, log_neg_prob)
         return loss

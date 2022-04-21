@@ -1,4 +1,4 @@
-from framework.trainer1 import Trainer, Trainer_Resample, Trainer_BPR, Trainer_Full
+from framework.trainer1 import Trainer, Trainer_Resample, Trainer_BPR, Trainer_Full, Trainer_Mix
 import argparse
 
 if __name__ == "__main__":
@@ -37,7 +37,8 @@ if __name__ == "__main__":
         trainer = Trainer(config)
     elif config['debias'] in [3,4,5]:
         trainer = Trainer_Resample(config)
-    # trainer = Trainer_Full(config)
+    elif config['debias'] in [6]:
+        trainer = Trainer_Mix(config)
     
     train_mat, test_mat = trainer.load_dataset()
     trainer.fit(train_mat, test_mat)
