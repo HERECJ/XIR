@@ -268,7 +268,7 @@ class Trainer:
         if self.config['debias'] == 1 :
             """ base debias, uniform sampling  """
             debias_module = Base_Debias(train_mat.shape[1], self.device)
-        elif self.config['debias'] == 2:
+        elif self.config['debias'] in [2, 7]:
             """ debias with popularity   """
             pop_count = train_mat.sum(axis=0).A.squeeze()
             debias_module = Pop_Debias(pop_count, self.device)
@@ -278,7 +278,7 @@ class Trainer:
         elif self.config['debias'] == 4:
             pop_count = train_mat.sum(axis=0).A.squeeze()
             debias_module = RePop_Debias_pop(pop_count, self.device)
-        elif self.config['debias'] == 5:
+        elif self.config['debias'] in [5, 8]:
             pop_count = train_mat.sum(axis=0).A.squeeze()
             debias_module = RePop_Debias_uni(pop_count, self.device)
         elif self.config['debias'] == 6:
@@ -377,32 +377,106 @@ class Trainer_Mix(Trainer):
         loss = model.loss(pos_rat, log_pos_prob, neg_rat, log_neg_prob)
         return loss
 
-
-class Trainer_Mix(Trainer):
+class Trainer_DelayBatch(Trainer):
     def __init__(self, config):
         super().__init__(config)
     
-    def _train_step(self, user_id, item_id, model: TowerModel, debias: Base_Debias):
+    def _train_step(self, user_id, item_id, model: TowerModel, debias: Base_Debias, last_id=None):
         query = model.construct_query(user_id)
-        item_emb = model.item_encoder(item_id)
+        if last_id is None:
+            items = item_id
+        else:
+            items = torch.cat([item_id, last_id], dim=-1)
+        item_emb = model.item_encoder(items)
 
-        # Uniformly sample items
+        B = user_id.shape[0]
+        
+        scores = torch.matmul(query, item_emb.T)
+        log_pos_prob = debias(user_id)
+        log_prob = debias(items)
+        pos_rat = torch.diag(scores)
+        
+        log_neg_prob = log_prob.view(1, -1).repeat(B, 1)
+        
+        loss = model.loss(pos_rat, log_pos_prob, scores, log_neg_prob)
+
+        return loss
+        
+
+    def _fit(self, model: TowerModel, debias: Base_Debias, train_loader: DataLoader, test_loader=None):
+        num_epoch = self.config['epoch']
+        optimizer = self.config_optimizers(model.parameters(), self.config['learning_rate'], self.config['weight_decay'])
+        
+        if self.config['steprl'] :
+            scheduler = optim.lr_scheduler.StepLR(optimizer, self.config['step_size'], self.config['step_gamma'])
+
+
+        for epoch in range(num_epoch):
+            loss_ = 0.0
+            
+            for batch_idx, batch_data in enumerate(train_loader):
+                model.train()
+                debias.train()
+
+                optimizer.zero_grad()
+
+                user_id, item_id = batch_data
+                user_id, item_id = user_id.to(self.device), item_id.to(self.device)
+
+                last_id = item_id
+                if epoch == 0 and batch_idx == 0:
+                    loss = self._train_step(user_id, item_id, model, debias)
+                else:
+                    loss = self._train_step(user_id, item_id, model, debias, last_id)
+
+                loss_ += loss.detach()
+                loss.backward()
+                optimizer.step()
+            
+            if self.config['steprl'] :
+                scheduler.step()
+            self.writer.add_scalar("Train/Loss", loss_/(batch_idx+1.0), epoch)
+            self.logger.info('Epoch {}'.format(epoch))
+            self.logger.info('***************Train loss {:.8f}'.format(loss_))
+
+            if ((epoch % self.config['valid_interval']) == 0) or (epoch >= num_epoch - 1):
+                with torch.no_grad():
+                    out = self.evaluate(model, test_loader)
+
+                for k in out.keys():
+                    self.writer.add_scalar("Evaluate/{}".format(k), out[k], epoch)
+                ress = (', ').join(["{} : {:.6f}".format(k, out[k]) for k in out.keys()])
+                    
+                self.logger.info('***************Eval_Res ' + ress)
+        
+            self.writer.flush()
+
+class Trainer_Re_DelayBatch(Trainer_DelayBatch):
+    def __init__(self, config):
+        super().__init__(config)
+    
+    def _train_step(self, user_id, item_id, model: TowerModel, debias: Base_Debias, last_id=None):
+        query = model.construct_query(user_id)
+        if last_id is None:
+            items = item_id
+        else:
+            items = torch.cat([item_id, last_id], dim=-1)
+        item_emb = model.item_encoder(items)
+
         # B = user_id.shape[0]
-        sample_size = self.config['sample_size']
-        mixed_items = torch.randint(self.item_num, size=( sample_size,), device=self.device)
+        B = self.config['batch_size']
 
-        mixed_item_emb = model.item_encoder(mixed_items)
+        # log_pos_prob = debias.get_pop_bias(item_id)
+        log_pos_prob = torch.zeros_like(item_id, dtype=torch.float, device=self.device)
 
-        log_pop_prob, log_uni_prob = debias(item_id, mixed_items)
+        log_prob = debias.get_pop_bias(items)
 
+        scores = torch.matmul(query, item_emb.T)
+        pos_rat = torch.diag(scores)
 
-        pop_scores = torch.matmul(query, item_emb.T)
-        uni_scores = torch.matmul(query, mixed_item_emb.T)
+        _, IndM, log_neg_prob = debias.resample(scores, log_prob, B)
 
-        pos_rat = torch.diag(pop_scores)
-        neg_rat = torch.cat([pop_scores, uni_scores], dim=-1)
-
-        log_pos_prob = log_pop_prob
-        log_neg_prob = torch.cat([log_pop_prob, log_uni_prob], dim=-1)
+        neg_rat = torch.gather(scores, 1, IndM)
         loss = model.loss(pos_rat, log_pos_prob, neg_rat, log_neg_prob)
+
         return loss

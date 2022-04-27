@@ -1,4 +1,5 @@
-from framework.trainer1 import Trainer, Trainer_Resample, Trainer_BPR, Trainer_Full, Trainer_Mix
+from defusedxml import NotSupportedError
+from framework.trainer1 import Trainer, Trainer_Resample, Trainer_Mix, Trainer_DelayBatch, Trainer_Re_DelayBatch
 import argparse
 
 if __name__ == "__main__":
@@ -39,6 +40,12 @@ if __name__ == "__main__":
         trainer = Trainer_Resample(config)
     elif config['debias'] in [6]:
         trainer = Trainer_Mix(config)
+    elif config['debias'] in [7]:
+        trainer = Trainer_DelayBatch(config)
+    elif config['debias'] in [8]:
+        trainer = Trainer_Re_DelayBatch(config)
+    else:
+        raise NotSupportedError
     
     train_mat, test_mat = trainer.load_dataset()
     trainer.fit(train_mat, test_mat)
