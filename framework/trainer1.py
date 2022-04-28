@@ -392,7 +392,7 @@ class Trainer_DelayBatch(Trainer):
         B = user_id.shape[0]
         
         scores = torch.matmul(query, item_emb.T)
-        log_pos_prob = debias(user_id)
+        log_pos_prob = debias(item_id)
         log_prob = debias(items)
         pos_rat = torch.diag(scores)
         
@@ -467,15 +467,15 @@ class Trainer_Re_DelayBatch(Trainer_DelayBatch):
         B = self.config['batch_size']
 
         # log_pos_prob = debias.get_pop_bias(item_id)
-        log_pos_prob = torch.zeros_like(item_id, dtype=torch.float, device=self.device)
+        log_pos_prob = - torch.log(self.item_num * torch.ones_like(item_id, dtype=torch.float, device=self.device))
 
         log_prob = debias.get_pop_bias(items)
 
         scores = torch.matmul(query, item_emb.T)
         pos_rat = torch.diag(scores)
-
+        # import pdb; pdb.set_trace()
         _, IndM, log_neg_prob = debias.resample(scores, log_prob, B)
-
+        # import pdb; pdb.set_trace()
         neg_rat = torch.gather(scores, 1, IndM)
         loss = model.loss(pos_rat, log_pos_prob, neg_rat, log_neg_prob)
 
