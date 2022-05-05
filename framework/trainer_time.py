@@ -1,7 +1,7 @@
 import logging, os, datetime, time
 from framework.dataloader import RatMixData, UserHisData, UserTestData, pad_collate_valid
 from framework.model import TowerModel, MFModel
-from framework.debias1 import Base_Debias, Pop_Debias, RePop_Debias, RePop_Debias_pop, RePop_Debias_uni, MixDebias
+from framework.debias import Base_Debias, Pop_Debias, ReSample_Debias, MixNeg_Debias
 import framework.eval as eval
 import numpy as np
 import torch
@@ -10,9 +10,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-
 def get_logger(filename, verbosity=1, name=None):
-    filename = filename + '.txt'
+    filename = filename
     level_dict = {0: logging.DEBUG, 1: logging.INFO, 2: logging.WARNING}
     formatter = logging.Formatter(
         "[%(asctime)s][%(filename)s][line:%(lineno)d][%(levelname)s] %(message)s"
@@ -45,14 +44,17 @@ class Trainer:
         ISOTIMEFORMAT = '%m%d-%H%M%S'
         timestamp = str(datetime.datetime.now().strftime(ISOTIMEFORMAT))
 
+        seed = 'seed' + str(self.config['seed']) 
+
+
 
         sampled_flag = 'sampled_' + str(self.config['sample_size']) if self.config['sample_from_batch'] is True else 'full'
-        log_name = '_'.join((self.config['data_name'], str(self.config['debias']), sampled_flag, timestamp))
+        log_name = '_'.join((self.config['data_name'], str(self.config['batch_size']), str(self.config['debias']), sampled_flag, str(self.config['learning_rate']), seed, timestamp))
         os.makedirs(os.path.join(self.config['log_path'], log_name))
         log_file_name = os.path.join(self.config['log_path'], log_name)
         self.writer = SummaryWriter(log_dir=log_file_name)
         
-        logname = log_file_name + '/log.txt'
+        logname = log_file_name + '/time_log.txt'
         self.logger = get_logger(logname)
         self.logger.info(self.config)
 
@@ -145,40 +147,29 @@ class Trainer:
         out = dict(zip(metrics, out))
         return out
 
-    def _train_step(self, user_id, item_id, model:TowerModel, debias:Base_Debias):
-        """
-            Support not resample based method
-        """
-        # TODO : item features (optional)
+    def _train_step(self, user_id, item_id, model:TowerModel, debias: Base_Debias, **kwargs):
         query = model.construct_query(user_id)
         item_emb = model.item_encoder(item_id)
-
-
-        # generate the index matrix of items
         B = user_id.shape[0]
+
+        scores = torch.matmul(query, item_emb.T)
+        log_pos_prob = debias(item_id)
+        pos_rat = torch.diag(scores)
+
         
+
         if self.config['sample_from_batch']:
+            # Only resample method have sample_from_batch
             sample_size = self.config['sample_size']
             assert sample_size > 1 and sample_size<B, ValueError('The number of samples must be greater than 1 and smaller than batch_size')
             # Actually, 'replacement=True'
-            IndM = torch.randint(B, size=(B,sample_size), device=self.device)  # B x S
-
-            neg_items_emb = item_emb[IndM]
-            neg_items = item_id[IndM]
-
-            log_pos_prob, log_neg_prob = debias(item_id), debias(neg_items)
-            pos_rat = model.scorer(query, item_emb)
-            neg_rat = model.scorer(query, neg_items_emb)
-        
+            IndM = torch.randint(B, size=(B,sample_size), device=self.device)
+            log_neg_prob = log_pos_prob[IndM]
+            neg_rat = torch.gather(scores, 1, IndM)
         else:
-            neg_rat = torch.matmul(query, item_emb.T) 
-            pos_rat = torch.diag(neg_rat)
-
-            log_pos_prob = debias(item_id)
             log_neg_prob = log_pos_prob.view(1, -1).repeat(B, 1)
+            neg_rat = scores
         
-
-        ##### training step
         loss = model.loss(pos_rat, log_pos_prob, neg_rat, log_neg_prob)
         return loss
 
@@ -190,7 +181,8 @@ class Trainer:
         if self.config['steprl'] :
             scheduler = optim.lr_scheduler.StepLR(optimizer, self.config['step_size'], self.config['step_gamma'])
 
-
+        cal_grad_time = 0.0
+        cal_opti_time = 0.0
         for epoch in range(num_epoch):
             loss_ = 0.0
             
@@ -203,17 +195,25 @@ class Trainer:
                 user_id, item_id = batch_data
                 user_id, item_id = user_id.to(self.device), item_id.to(self.device)
 
-                loss = self._train_step(user_id, item_id, model, debias)
+                loss = self._train_step(user_id, item_id, model, debias, batch_idx=batch_idx)
 
-                loss_ += loss.item()
+                loss_ += loss.detach()
+                t0 = time.time()
                 loss.backward()
+                t1 = time.time()
                 optimizer.step()
+                t2 = time.time()
+                cal_grad_time += t1 - t0
+                cal_opti_time += t2 - t1
 
             if self.config['steprl'] :
                 scheduler.step()
             self.writer.add_scalar("Train/Loss", loss_/(batch_idx+1.0), epoch)
+            self.writer.add_scalar("Train/Time(s)_lossbp", cal_grad_time, epoch)
+            self.writer.add_scalar("Train/Time(s)_optistep", cal_opti_time, epoch)
             self.logger.info('Epoch {}'.format(epoch))
             self.logger.info('***************Train loss {:.8f}'.format(loss_))
+            self.logger.info('Times, loss_bp {:.10f}, optim_step {:10f}'.format(cal_grad_time, cal_opti_time))
 
             if ((epoch % self.config['valid_interval']) == 0) or (epoch >= num_epoch - 1):
                 with torch.no_grad():
@@ -227,83 +227,49 @@ class Trainer:
         
             self.writer.flush()
 
-
+            
     def fit(self, train_mat, test_mat):
         train_data = UserHisData(train_mat=train_mat)
-        train_loader = DataLoader(train_data, batch_size=self.config['batch_size'], num_workers=self.config['num_workers'], shuffle=True)
+        train_loader = DataLoader(train_data, batch_size=self.config['batch_size'], num_workers=self.config['num_workers'], shuffle=True, pin_memory=True)
         test_data = UserTestData(train_mat=train_mat, test_mat=test_mat)
         test_loader = DataLoader(test_data, batch_size=self.config['eval_batch_size'], collate_fn=pad_collate_valid, num_workers=self.config['num_workers'])
         model = self.model_init(train_mat=train_mat)
 
         #=========================================
         # Define bias mmodule
-        # Base debias : uniform, Pop debias : pop, RePop debias : resampling + pop debias
+        # Base debias : uniform, Pop debias : pop
         if self.config['debias'] == 1 :
             """ base debias, uniform sampling  """
             debias_module = Base_Debias(train_mat.shape[1], self.device)
-        elif self.config['debias'] == 2:
+        elif self.config['debias'] in [2, 5]:
             """ debias with popularity   """
             pop_count = train_mat.sum(axis=0).A.squeeze()
             debias_module = Pop_Debias(pop_count, self.device)
-        elif self.config['debias'] == 3:
+        elif self.config['debias'] in [3, 6]:
             pop_count = train_mat.sum(axis=0).A.squeeze()
-            debias_module = RePop_Debias(pop_count, self.device)
+            debias_module = ReSample_Debias(pop_count, self.device)
         elif self.config['debias'] == 4:
             pop_count = train_mat.sum(axis=0).A.squeeze()
-            debias_module = RePop_Debias_pop(pop_count, self.device)
-        elif self.config['debias'] == 5:
-            pop_count = train_mat.sum(axis=0).A.squeeze()
-            debias_module = RePop_Debias_uni(pop_count, self.device)
-        elif self.config['debias'] == 6:
-            pop_count = train_mat.sum(axis=0).A.squeeze()
-            debias_module = MixDebias(pop_count, self.device)
+            debias_module = MixNeg_Debias(pop_count, self.device)
         else:
-             raise NotImplementedError
+            raise NotImplementedError
         
         debias_module = debias_module.to(self.device)
         #=========================================
         self._fit(model, debias_module, train_loader, test_loader)
 
 
-class Trainer_Full(Trainer):
-    def __init__(self, config):
-        super().__init__(config)
-    
-    def _train_step(self, user_id, item_id, model: TowerModel, debias: Base_Debias):
-        query = model.construct_query(user_id)
-        pos_score = model.scorer(query, model.item_encoder(item_id))
-        all_score = model.scorer(query, model.item_encoder.weight[1:])
-        loss = model.loss_full_softmax(pos_score, all_score)
-        return loss
-
-class Trainer_BPR(Trainer):
-    def __init__(self, config):
-        super().__init__(config)
-    
-    def _train_step(self, user_id, item_id, model: TowerModel, debias: Base_Debias):
-        B = item_id.shape[0]
-        query = model.construct_query(user_id)
-        pos_score = model.scorer(query, model.item_encoder(item_id))
-
-        neg_items = torch.randint(self.item_num, size=(B, 5), device=self.device)
-        neg_score =  model.scorer(query, model.item_encoder(neg_items))
-        loss = -torch.mean(F.logsigmoid(pos_score.view(*pos_score.shape, 1) - neg_score))
-        return loss
-
 class Trainer_Resample(Trainer):
     def __init__(self, config):
         super().__init__(config)
     
-    def _train_step(self, user_id, item_id, model: TowerModel, debias: Base_Debias):
-        """
-            Support resample        
-        """
-        # TODO : item features (optional)
+    def _train_step(self, user_id, item_id, model: TowerModel, debias: ReSample_Debias, **kwargs):
         query = model.construct_query(user_id)
         item_emb = model.item_encoder(item_id)
 
         # generate the index matrix of items
         B = user_id.shape[0]
+        # B = self.config['batch_size']
         if self.config['sample_from_batch']:
             sample_size = min(B, self.config['sample_size'])
         else:
@@ -314,42 +280,41 @@ class Trainer_Resample(Trainer):
         scores = torch.matmul(query, item_emb.T)
         log_pos_prob, IndM, log_neg_prob = debias.resample(scores, log_pop_bias, sample_size)
 
-        # neg_items = item_id[IndM]
-        ##### training step
         pos_rat = torch.diag(scores)
         neg_rat = torch.gather(scores, 1, IndM)
         loss = model.loss(pos_rat, log_pos_prob, neg_rat, log_neg_prob)
         return loss
 
 
-
-class Trainer_Mix(Trainer):
+class Trainer_MixNeg(Trainer):
+    """
+        Mixed Negative Sampling for Learning Two-tower Neural Networks in Recommendations
+    """
     def __init__(self, config):
         super().__init__(config)
     
-    def _train_step(self, user_id, item_id, model: TowerModel, debias: Base_Debias):
+    def _train_step(self, user_id, item_id, model: TowerModel, debias: MixNeg_Debias, **kwargs):
         query = model.construct_query(user_id)
         item_emb = model.item_encoder(item_id)
 
         # Uniformly sample items
         # B = user_id.shape[0]
         sample_size = self.config['sample_size']
-        mixed_items = torch.randint(self.item_num, size=( sample_size,), device=self.device)
+        mixed_items = torch.randint(self.item_num, size=(sample_size,), device=self.device)
 
         mixed_item_emb = model.item_encoder(mixed_items)
 
-        log_pop_prob, log_uni_prob = debias(item_id, mixed_items)
+        items = torch.cat([item_id, mixed_items], dim=-1)
 
+        log_pos_prob = debias.get_pop_bias(item_id)
+        ratio = ( sample_size * 1.0 ) / (sample_size + self.config['batch_size']) 
 
+        log_neg_prob = debias(items, ratio=ratio)
         pop_scores = torch.matmul(query, item_emb.T)
         uni_scores = torch.matmul(query, mixed_item_emb.T)
 
         pos_rat = torch.diag(pop_scores)
         neg_rat = torch.cat([pop_scores, uni_scores], dim=-1)
 
-        log_pos_prob = log_pop_prob
-        log_neg_prob = torch.cat([log_pop_prob, log_uni_prob], dim=-1)
         loss = model.loss(pos_rat, log_pos_prob, neg_rat, log_neg_prob)
         return loss
-
-        

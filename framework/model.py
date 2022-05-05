@@ -1,5 +1,3 @@
-from ast import Not
-from turtle import forward
 import torch
 import torch.nn as nn
 
@@ -50,19 +48,7 @@ class MFModel(TowerModel):
     
     def construct_query(self, user_id):
         return self.user_encoder(user_id)
-    
-    # def loss(self, pos_score, log_pos_prob, neg_score, log_neg_prob):
-    #     # sampled softmax TODO check for this
-    #     # different from previous studies, pos_score may include padding values
-    #     new_pos = pos_score - log_pos_prob.detach()
-    #     new_neg = neg_score - log_neg_prob.detach()
-    #     if new_pos.dim() < new_neg.dim():
-    #         new_pos.sequeeze_(-1)
-    #     new_neg = torch.cat([new_pos, new_neg], dim=-1)
-    #     output = torch.logsumexp(new_neg, dim=-1, keepdim=True) - new_pos
-    #     notpadnum = torch.logical_not(torch.isinf(pos_score)).float().sum(-1)
-    #     output = torch.nan_to_num(output, posinf=0).sum(-1) / notpadnum
-    #     return torch.mean(output)
+
     
     def loss(self, pos_score, log_pos_prob, neg_score, log_neg_prob):
         # pos_score : B
@@ -75,7 +61,10 @@ class MFModel(TowerModel):
         output = torch.logsumexp(partition, dim=-1, keepdim=True) - new_pos
         return torch.mean(output)
     
-    def loss_full_softmax(self, pos_score, full_score):
-        output = torch.logsumexp(full_score, dim=-1, keepdim=True) - pos_score.unsqueeze_(-1)
+    def loss_(self, pos_score, neg_score):
+        if pos_score.dim() < neg_score.dim():
+            pos_score.unsqueeze_(-1)
+        partition = torch.cat([pos_score, neg_score], dim=-1)
+        output = torch.logsumexp(partition, dim=-1, keepdim=True) - pos_score
         return torch.mean(output)
     

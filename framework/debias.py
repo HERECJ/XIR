@@ -1,4 +1,3 @@
-from turtle import forward
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -43,11 +42,7 @@ class Pop_Debias(Base_Debias):
     def forward(self, items):
         return torch.log(self.pop_prob[items])
 
-class RePop_Debias(Pop_Debias):
-    """
-        Importance Resampling method is adopted here
-        TODO resample size
-    """
+class ReSample_Debias(Pop_Debias):
     def __init__(self, pop_count, device, mode=1, **kwargs):
         super().__init__(pop_count, device, mode, **kwargs)
     
@@ -59,37 +54,14 @@ class RePop_Debias(Pop_Debias):
         # log_prob: B 
         sample_weight = F.softmax(score - log_prob, dim=-1)
         indices = torch.multinomial(sample_weight, sample_size, replacement=True)
-        neg_prob = torch.gather(sample_weight, 1, indices)
-        pos_prob = torch.diag(sample_weight)
-        return torch.log(pos_prob), indices, torch.log(neg_prob)
-        # return torch.log(torch.ones_like(pos_prob)), indices, torch.log(torch.ones_like(neg_prob))
-
-
-class RePop_Debias_pop(RePop_Debias):
-    def resample(self, score, log_prob, sample_size):
-        # score : B x B
-        # log_prob: B 
-        sample_weight = F.softmax(score - log_prob, dim=-1)
-        indices = torch.multinomial(sample_weight, sample_size, replacement=True)
-        # neg_prob = torch.gather(sample_weight, 1, indices)
-        # pos_prob = torch.diag(sample_weight)
-        # return torch.log(pos_prob), indices, torch.log(neg_prob)
-        return log_prob, indices, log_prob[indices]
-
-class RePop_Debias_uni(RePop_Debias):
-    def resample(self, score, log_prob, sample_size):
-        # score : B x B
-        # log_prob: B 
-        sample_weight = F.softmax(score - log_prob, dim=-1)
-        indices = torch.multinomial(sample_weight, sample_size, replacement=True)
-        # neg_prob = torch.gather(sample_weight, 1, indices)
-        # pos_prob = torch.diag(sample_weight)
-        # return torch.log(pos_prob), indices, torch.log(neg_prob)
         return -torch.log(self.item_num * torch.ones_like(log_prob)), indices, -torch.log(self.item_num * torch.ones_like(log_prob[indices]))
 
-class MixDebias(Pop_Debias):
+class MixNeg_Debias(Pop_Debias):
     def __init__(self, pop_count, device, mode=1, **kwargs):
         super().__init__(pop_count, device, mode, **kwargs)
     
-    def forward(self, batch_items, mix_items):
-        return torch.log(self.pop_prob[batch_items]), -torch.log(self.item_num * torch.ones_like(mix_items, device=self.device))
+    def get_pop_bias(self, items):
+        return torch.log(self.pop_prob[items])
+    
+    def forward(self, items, ratio=0.5):
+        return torch.log(ratio * self.pop_prob[items] + (1 - ratio) * (1.0 / self.item_num))

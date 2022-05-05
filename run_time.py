@@ -1,4 +1,5 @@
-from framework.trainer2 import Trainer, Trainer_Resample, Trainer_Mix
+from xml.dom import NotSupportedErr
+from framework.trainer_time import Trainer, Trainer_Resample, Trainer_MixNeg
 import argparse
 
 if __name__ == "__main__":
@@ -26,19 +27,20 @@ if __name__ == "__main__":
     parser.add_argument('--steprl', action='store_false', help='whether to use steprl, default true')
     parser.add_argument('--step_size', default=5, type=int, help='step size for stepRL')
     parser.add_argument('--step_gamma', default=0.95, type=float, help='step discount for stepRL')
-    parser.add_argument('--debias', default=6, type=int, help='the debias method')
+    parser.add_argument('--debias', default=2, type=int, help='the debias method')
     parser.add_argument('--sample_from_batch', action='store_true', help='indicate whether sampling from batch')
     parser.add_argument('--sample_size', default=10, type=int)
+    parser.add_argument('--lambda', default=0.5, type=float, help='the coefficient to controll the cache')
 
     config = vars(parser.parse_args())
 
 
     if config['debias'] in [1,2]:
         trainer = Trainer(config)
-    elif config['debias'] in [3,4,5]:
+    elif config['debias'] in [3]:
         trainer = Trainer_Resample(config)
-    elif config['debias'] in [6]:
-        trainer = Trainer_Mix(config)
+    else:
+        raise NotSupportedErr
     
     train_mat, test_mat = trainer.load_dataset()
     trainer.fit(train_mat, test_mat)

@@ -1,5 +1,6 @@
-from defusedxml import NotSupportedError
-from framework.trainer1 import Trainer, Trainer_Resample, Trainer_Mix, Trainer_DelayBatch, Trainer_Re_DelayBatch
+from xml.dom import NotSupportedErr
+from framework.trainer import Trainer, Trainer_Resample, Trainer_MixNeg, Trainer_WithLast, Trainer_Re_WithLast
+from framework.trainer_cache import Trainer_Cache
 import argparse
 
 if __name__ == "__main__":
@@ -30,22 +31,26 @@ if __name__ == "__main__":
     parser.add_argument('--debias', default=2, type=int, help='the debias method')
     parser.add_argument('--sample_from_batch', action='store_true', help='indicate whether sampling from batch')
     parser.add_argument('--sample_size', default=10, type=int)
+    parser.add_argument('--lambda', default=0.5, type=float, help='the coefficient to controll the cache')
 
     config = vars(parser.parse_args())
 
 
     if config['debias'] in [1,2]:
         trainer = Trainer(config)
-    elif config['debias'] in [3,4,5]:
+    elif config['debias'] in [3]:
         trainer = Trainer_Resample(config)
+    elif config['debias'] in [4]:
+        trainer = Trainer_MixNeg(config)
+    elif config['debias'] in [5]:
+        trainer = Trainer_WithLast(config)
     elif config['debias'] in [6]:
-        trainer = Trainer_Mix(config)
-    elif config['debias'] in [7]:
-        trainer = Trainer_DelayBatch(config)
+        trainer = Trainer_Re_WithLast(config)
+    # TODO : add the debias of the paper : sampling-debias-correction
     elif config['debias'] in [8]:
-        trainer = Trainer_Re_DelayBatch(config)
+        trainer = Trainer_Cache(config)
     else:
-        raise NotSupportedError
+        raise NotSupportedErr
     
     train_mat, test_mat = trainer.load_dataset()
     trainer.fit(train_mat, test_mat)
