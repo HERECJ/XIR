@@ -33,6 +33,7 @@ do
     python run.py --device cuda --learning_rate ${lr} --weight_decay ${w} --log_path ${logs} --debias 6 --batch_size $b --data_name ${data} --epoch ${epoch} --seed ${s};
 
     # Sample 7 : sampling bias correction
+    python run.py --device cuda --learning_rate ${lr} --weight_decay ${w} --log_path ${logs} --debias 7 --batch_size $b --data_name ${data} --epoch ${epoch} --seed ${s} --alpha 1e-4;
 
     # Resample with Cache
     python run.py --device cuda --learning_rate ${lr} --weight_decay ${w} --log_path ${logs} --debias 8 --batch_size $b --data_name ${data} --epoch ${epoch} --seed ${s} --lambda 0.2;

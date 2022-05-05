@@ -42,6 +42,25 @@ class Pop_Debias(Base_Debias):
     def forward(self, items):
         return torch.log(self.pop_prob[items])
 
+class EstPop_Debias(Base_Debias):
+    """
+        debias the weights according to the popularity
+    """
+    def __init__(self, item_num, device, alpha=1e-4, **kwargs):
+        super().__init__(item_num, device)
+        
+        self.A = torch.zeros(self.item_num, device=self.device)
+        self.B = torch.ones(self.item_num, device=self.device)
+        self.t = torch.zeros(1, device=self.device)
+        self.alpha = alpha
+    
+    def forward(self, items):
+        self.t += 1
+        delta = (1 - self.alpha) * self.B[items] + self.alpha * (self.t - self.A[items])
+        self.B = self.B.index_put((items,), values=delta)
+        self.A = self.A.index_put((items,), values=self.t)
+        return torch.log(1 / delta)
+
 class ReSample_Debias(Pop_Debias):
     def __init__(self, pop_count, device, mode=1, **kwargs):
         super().__init__(pop_count, device, mode, **kwargs)

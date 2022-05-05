@@ -1,7 +1,7 @@
 import logging, os, datetime, time
 from framework.dataloader import RatMixData, UserHisData, UserTestData, pad_collate_valid
 from framework.model import TowerModel, MFModel
-from framework.debias import Base_Debias, Pop_Debias, ReSample_Debias, MixNeg_Debias
+from framework.debias import Base_Debias, Pop_Debias, EstPop_Debias, ReSample_Debias, MixNeg_Debias
 import framework.eval as eval
 import numpy as np
 import torch
@@ -239,6 +239,8 @@ class Trainer:
         elif self.config['debias'] == 4:
             pop_count = train_mat.sum(axis=0).A.squeeze()
             debias_module = MixNeg_Debias(pop_count, self.device)
+        elif self.config['debias'] == 7:
+            debias_module = EstPop_Debias(train_mat.shape[1], self.device, self.config['alpha'])
         else:
             raise NotImplementedError
         

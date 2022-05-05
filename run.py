@@ -32,11 +32,12 @@ if __name__ == "__main__":
     parser.add_argument('--sample_from_batch', action='store_true', help='indicate whether sampling from batch')
     parser.add_argument('--sample_size', default=10, type=int)
     parser.add_argument('--lambda', default=0.5, type=float, help='the coefficient to controll the cache')
+    parser.add_argument('--alpha', default=1e-4, type=float, help='the lr of the streaming frequency estimation algorithm')
 
     config = vars(parser.parse_args())
 
 
-    if config['debias'] in [1,2]:
+    if config['debias'] in [1,2,7]:
         trainer = Trainer(config)
     elif config['debias'] in [3]:
         trainer = Trainer_Resample(config)
@@ -46,7 +47,6 @@ if __name__ == "__main__":
         trainer = Trainer_WithLast(config)
     elif config['debias'] in [6]:
         trainer = Trainer_Re_WithLast(config)
-    # TODO : add the debias of the paper : sampling-debias-correction
     elif config['debias'] in [8]:
         trainer = Trainer_Cache(config)
     else:
