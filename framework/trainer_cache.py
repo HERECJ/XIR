@@ -14,7 +14,7 @@ class Cache(Pop_Debias):
         self.size = size
         self.occurence = torch.ones(self.item_num, device=device)
 
-        self.sample_pool = torch.randint(0, self.item_num + 1, (size,), device=self.device) # self.item_num: item_num + 1
+        self.sample_pool = torch.randint(0, self.item_num, (size,), device=self.device) # self.item_num: item_num + 1
 
     def update_pool(self, current_items, current_scores, cached_scores, batch_idx=0, ratio=0.5, **kwargs):
         num_item = int(self.size / 2) # 一般是偶数

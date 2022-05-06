@@ -18,7 +18,7 @@ https://drive.google.com/drive/folders/1ahiLmzU7cGRPXf5qGMqtAChte2eYp9gI
 
 ## Requirements
 + See `requirement.txt`
-+ or manual update packages 
++ or manually update packages 
 
 ## Others
 PPT
