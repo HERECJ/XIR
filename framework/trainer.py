@@ -59,7 +59,7 @@ class Trainer:
     def set_seed(self):
         if self.config['fix_seed']:
             import os
-            seed = self.config['fix_seed']
+            seed = self.config['seed']
             os.environ['PYTHONHASHSEED']=str(seed)
 
             import random
