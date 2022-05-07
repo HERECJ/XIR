@@ -49,17 +49,25 @@ class EstPop_Debias(Base_Debias):
     def __init__(self, item_num, device, alpha=1e-4, **kwargs):
         super().__init__(item_num, device)
         
-        self.A = torch.zeros(self.item_num, device=self.device)
-        self.B = torch.ones(self.item_num, device=self.device)
+        self.primes = [4993, 4999, 5003, 5009, 5011]
+        # self.A = torch.zeros(self.item_num, device=self.device)
+        # self.B = torch.ones(self.item_num, device=self.device)
+        self.A = [torch.zeros(self.primes[i], device=self.device) for i in range(len(self.primes))]
+        self.B = [torch.ones(self.primes[i], device=self.device) for i in range(len(self.primes))]
         self.t = torch.zeros(1, device=self.device)
         self.alpha = alpha
     
     def forward(self, items):
         self.t += 1
-        delta = (1 - self.alpha) * self.B[items] + self.alpha * (self.t - self.A[items])
-        self.B = self.B.index_put((items,), values=delta)
-        self.A = self.A.index_put((items,), values=self.t)
-        return torch.log(1 / delta)
+        pi = []
+        for i in range(len(self.A)):
+            keys = items % self.primes[i]
+            delta = (1 - self.alpha) * self.B[i][keys] + self.alpha * (self.t - self.A[i][keys])
+            self.B[i] = self.B[i].index_put((keys,), values=delta)
+            self.A[i] = self.A[i].index_put((keys,), values=self.t)
+            pi.append(delta)
+
+        return torch.log(1 / torch.max(torch.stack(pi, dim=0), dim=0)[0])
 
 class ReSample_Debias(Pop_Debias):
     def __init__(self, pop_count, device, mode=1, **kwargs):
