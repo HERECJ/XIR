@@ -31,6 +31,7 @@ if __name__ == "__main__":
     parser.add_argument('--sample_from_batch', action='store_true', help='indicate whether sampling from batch')
     parser.add_argument('--sample_size', default=10, type=int)
     parser.add_argument('--lambda', default=0.5, type=float, help='the coefficient to controll the cache')
+    parser.add_argument('--pop_mode', default=2, type=int, help='the mode of pop normalization')
 
     config = vars(parser.parse_args())
 

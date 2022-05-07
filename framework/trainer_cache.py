@@ -111,9 +111,9 @@ class Trainer_Cache(Trainer):
 
         pop_count = train_mat.sum(axis=0).A.squeeze()
         if self.config['debias'] in [8]:
-            debias_module = Cache(pop_count, self.device, self.config['batch_size'])
+            debias_module = Cache(pop_count, self.device, self.config['batch_size'], mode=self.config['pop_mode'])
         elif self.config['debias'] in [9]:
-            debias_module = Cache_Mix(pop_count, self.device, self.config['batch_size'])
+            debias_module = Cache_Mix(pop_count, self.device, self.config['batch_size'], mode=self.config['pop_mode'])
         else:
             raise NotImplementedError
 

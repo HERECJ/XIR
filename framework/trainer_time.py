@@ -240,17 +240,17 @@ class Trainer:
         # Base debias : uniform, Pop debias : pop
         if self.config['debias'] == 1 :
             """ base debias, uniform sampling  """
-            debias_module = Base_Debias(train_mat.shape[1], self.device)
+            debias_module = Base_Debias(train_mat.shape[1], self.device, mode=self.config['pop_mode'])
         elif self.config['debias'] in [2, 5]:
             """ debias with popularity   """
             pop_count = train_mat.sum(axis=0).A.squeeze()
-            debias_module = Pop_Debias(pop_count, self.device)
+            debias_module = Pop_Debias(pop_count, self.device, mode=self.config['pop_mode'])
         elif self.config['debias'] in [3, 6]:
             pop_count = train_mat.sum(axis=0).A.squeeze()
-            debias_module = ReSample_Debias(pop_count, self.device)
+            debias_module = ReSample_Debias(pop_count, self.device, mode=self.config['pop_mode'])
         elif self.config['debias'] == 4:
             pop_count = train_mat.sum(axis=0).A.squeeze()
-            debias_module = MixNeg_Debias(pop_count, self.device)
+            debias_module = MixNeg_Debias(pop_count, self.device, mode=self.config['pop_mode'])
         else:
             raise NotImplementedError
         
