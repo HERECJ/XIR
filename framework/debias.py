@@ -29,7 +29,7 @@ class Pop_Debias(Base_Debias):
         if mode == 1:
             pop_count = pop_count
         elif mode == 2:
-            pop_count = torch.log( 1 + pop_count )
+            pop_count = torch.log( 1 + pop_count ) + 1e-8
         elif mode == 3:
             pop_count = pop_count ** 0.75
         else:
@@ -68,6 +68,17 @@ class EstPop_Debias(Base_Debias):
             pi.append(delta)
 
         return torch.log(1 / torch.max(torch.stack(pi, dim=0), dim=0)[0])
+    
+    def get_pop_bias(self, items):
+        return self.forward(items)
+    
+
+    def resample(self, score, log_prob, sample_size):
+        # score : B x B
+        # log_prob: B 
+        sample_weight = F.softmax(score - log_prob, dim=-1)
+        indices = torch.multinomial(sample_weight, sample_size, replacement=True)
+        return -torch.log(self.item_num * torch.ones_like(log_prob)), indices, -torch.log(self.item_num * torch.ones_like(log_prob[indices]))
 
 class ReSample_Debias(Pop_Debias):
     def __init__(self, pop_count, device, mode=1, **kwargs):

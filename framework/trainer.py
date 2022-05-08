@@ -239,7 +239,7 @@ class Trainer:
         elif self.config['debias'] == 4:
             pop_count = train_mat.sum(axis=0).A.squeeze()
             debias_module = MixNeg_Debias(pop_count, self.device, mode=self.config['pop_mode'])
-        elif self.config['debias'] == 7:
+        elif self.config['debias'] in [7,9]:
             debias_module = EstPop_Debias(train_mat.shape[1], self.device, self.config['alpha'], mode=self.config['pop_mode'])
         else:
             raise NotImplementedError

@@ -40,7 +40,7 @@ if __name__ == "__main__":
 
     if config['debias'] in [1,2,7]:
         trainer = Trainer(config)
-    elif config['debias'] in [3]:
+    elif config['debias'] in [3,9]:
         trainer = Trainer_Resample(config)
     elif config['debias'] in [4]:
         trainer = Trainer_MixNeg(config)
