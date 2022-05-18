@@ -14,16 +14,16 @@ class Cache(Pop_Debias):
         self.size = size
         self.occurence = torch.ones(self.item_num, device=device)
 
-        self.sample_pool = torch.randint(0, self.item_num, (size,), device=self.device) # self.item_num: item_num + 1
+        self.sample_pool = torch.randint(1, self.item_num, (size,), device=self.device) # self.item_num: item_num + 1
 
     def update_pool(self, current_items, current_scores, cached_scores, batch_idx=0, ratio=0.5, **kwargs):
-        num_item = int(self.size / 2) # 一般是偶数
+        num_item = int(self.size / 2) 
         # check the dtype of num_item
 
         P_cache = self.occurence[self.sample_pool]
 
 
-        cache_weights = F.softmax(cached_scores - torch.log(P_cache), dim=-1)
+        cache_weights = F.softmax(cached_scores - torch.log(self.pop_prob[self.sample_pool]), dim=-1)
         current_weights = F.softmax(current_scores - torch.log(self.pop_prob[current_items]), dim=-1)
 
         indices_cache = torch.multinomial(cache_weights, num_item, replacement=True)
@@ -46,38 +46,6 @@ class Cache(Pop_Debias):
 
     def get_items_from_cache(self):
         return self.sample_pool
-
-class Cache_Mix(Cache):
-    def __init__(self, pop_count, device, size, mode=1, **kwargs):
-        super().__init__(pop_count, device, size, mode, **kwargs)
-    
-    def update_pool(self, current_items, current_scores, cached_scores, batch_idx=0, ratio=0.5, **kwargs):
-        candidate_items = torch.cat([current_items, self.sample_pool], dim=-1)
-        candidate_score = torch.cat([current_scores, cached_scores], dim=-1)
-
-        P_prob = self.occurence[candidate_items]
-        Q_prob = self.pop_prob[candidate_items]
-        # try whether normalize the probability
-
-        prob = ratio * P_prob + (1.0 - ratio) * Q_prob
-
-        weight = F.softmax(candidate_score - torch.log(prob), dim=-1)
-        indices = torch.multinomial(weight, self.size, replacement=True)
-
-        sampled_items = candidate_items[indices]
-        
-        values, counts = torch.unique(sampled_items, return_counts=True)
-        
-        # if batch_idx == 0: 
-            # self.occurence = torch.zeros(self.item_num, device=self.device)
-        
-        self.occurence[values] += counts
-
-        ## Update sample_pool
-        cache_indices = torch.multinomial(self.occurence[values], self.size, replacement=True) # TODO : check
-        self.sample_pool = values[cache_indices]
-
-        return torch.gather(candidate_score, -1, indices)
 
 
 class Trainer_Cache(Trainer):
@@ -112,8 +80,6 @@ class Trainer_Cache(Trainer):
         pop_count = train_mat.sum(axis=0).A.squeeze()
         if self.config['debias'] in [8]:
             debias_module = Cache(pop_count, self.device, self.config['batch_size'], mode=self.config['pop_mode'])
-        elif self.config['debias'] in [9]:
-            debias_module = Cache_Mix(pop_count, self.device, self.config['batch_size'], mode=self.config['pop_mode'])
         else:
             raise NotImplementedError
 
@@ -137,21 +103,3 @@ class Trainer_Cache(Trainer):
         loss_current = model.loss_(pos_rat, neg_rat_current)
 
         return self.config['lambda'] * loss_cache + (1-self.config['lambda']) * loss_current
-
-class Trainer_Cache_Mix(Trainer_Cache):
-    def __init__(self, config):
-        super().__init__(config)
-    
-    def _train_step(self, user_id, item_id, model: MFModel, debias: Cache, batch_idx=0, **kwargs):
-        query = model.construct_query(user_id)
-        item_emb = model.item_encoder(item_id)
-
-        scores = torch.matmul(query, item_emb.T)
-        pos_rat = torch.diag(scores)
-
-        cache_items = debias.get_items_from_cache()
-        cache_item_emb = model.item_encoder(cache_items)
-        cache_score = torch.matmul(query, cache_item_emb.T)
-
-        neg_rat = debias.update_pool(item_id, scores, cache_score, batch_idx=batch_idx, ratio=self.config['lambda'])
-        return model.loss_(pos_rat, neg_rat)

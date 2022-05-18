@@ -181,9 +181,11 @@ class Trainer:
         if self.config['steprl'] :
             scheduler = optim.lr_scheduler.StepLR(optimizer, self.config['step_size'], self.config['step_gamma'])
 
-        cal_grad_time = 0.0
-        cal_opti_time = 0.0
+        cal_grad = []
+        cal_opti = []
         for epoch in range(num_epoch):
+            cal_grad_time = 0.0
+            cal_opti_time = 0.0
             loss_ = 0.0
             
             for batch_idx, batch_data in enumerate(train_loader):
@@ -211,21 +213,17 @@ class Trainer:
             self.writer.add_scalar("Train/Loss", loss_/(batch_idx+1.0), epoch)
             self.writer.add_scalar("Train/Time(s)_lossbp", cal_grad_time, epoch)
             self.writer.add_scalar("Train/Time(s)_optistep", cal_opti_time, epoch)
+            cal_grad.append(cal_grad_time)
+            cal_opti.append(cal_opti_time)
             self.logger.info('Epoch {}'.format(epoch))
             self.logger.info('***************Train loss {:.8f}'.format(loss_))
             self.logger.info('Times, loss_bp {:.10f}, optim_step {:10f}'.format(cal_grad_time, cal_opti_time))
-
-            if ((epoch % self.config['valid_interval']) == 0) or (epoch >= num_epoch - 1):
-                with torch.no_grad():
-                    out = self.evaluate(model, test_loader)
-
-                for k in out.keys():
-                    self.writer.add_scalar("Evaluate/{}".format(k), out[k], epoch)
-                ress = (', ').join(["{} : {:.6f}".format(k, out[k]) for k in out.keys()])
-                    
-                self.logger.info('***************Eval_Res ' + ress)
         
             self.writer.flush()
+        self.writer.add_scalar("Train/Time(s)_lossbp", sum(cal_grad)/len(cal_grad), epoch + 1)
+        self.writer.add_scalar("Train/Time(s)_optistep", sum(cal_opti)/len(cal_opti), epoch + 1)
+        self.logger.info('Final Times, loss_bp {:.10f}, optim_step {:10f}'.format(sum(cal_grad)/len(cal_grad), sum(cal_opti)/len(cal_opti)))
+        self.writer.flush()
 
             
     def fit(self, train_mat, test_mat):

@@ -26,12 +26,6 @@ do
     # Mix Negatives
     python run.py --device cuda --learning_rate ${lr} --weight_decay ${w} --log_path ${logs} --debias 4 --batch_size $b --data_name ${data} --epoch ${epoch} --seed ${s} --sample_size ${b};
 
-    # With Last Batch PopDebias
-    python run.py --device cuda --learning_rate ${lr} --weight_decay ${w} --log_path ${logs} --debias 5 --batch_size $b --data_name ${data} --epoch ${epoch} --seed ${s};
-
-    # Resample 2B->B with last batch
-    python run.py --device cuda --learning_rate ${lr} --weight_decay ${w} --log_path ${logs} --debias 6 --batch_size $b --data_name ${data} --epoch ${epoch} --seed ${s};
-
     # Sample 7 : sampling bias correction
     python run.py --device cuda --learning_rate ${lr} --weight_decay ${w} --log_path ${logs} --debias 7 --batch_size $b --data_name ${data} --epoch ${epoch} --seed ${s} --alpha 1e-4;
 
@@ -80,13 +74,6 @@ do
     # Resample 
     python run.py --device cuda --learning_rate ${lr} --weight_decay ${w} --log_path ${logs} --debias 3 --batch_size $b --data_name ${data} --epoch ${epoch};
 
-    # Mix Negatives
-    python run.py --device cuda --learning_rate ${lr} --weight_decay ${w} --log_path ${logs} --debias 4 --batch_size $b --data_name ${data} --epoch ${epoch} --sample_size ${b};
-
-
-    # Resample 2B->B with last batch
-    python run.py --device cuda --learning_rate ${lr} --weight_decay ${w} --log_path ${logs} --debias 6 --batch_size $b --data_name ${data} --epoch ${epoch};
-
     # Resample with Cache
     python run.py --device cuda --learning_rate ${lr} --weight_decay ${w} --log_path ${logs} --debias 8 --batch_size $b --data_name ${data} --epoch ${epoch} --lambda 0.2;
 done ) & 
@@ -106,5 +93,3 @@ do
 done ) &
 
 wait
-
-# split them into multiple files

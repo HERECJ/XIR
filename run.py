@@ -33,21 +33,17 @@ if __name__ == "__main__":
     parser.add_argument('--sample_size', default=10, type=int)
     parser.add_argument('--lambda', default=0.5, type=float, help='the coefficient to controll the cache')
     parser.add_argument('--alpha', default=1e-4, type=float, help='the lr of the streaming frequency estimation algorithm')
-    parser.add_argument('--pop_mode', default=2, type=int, help='the mode of pop normalization')
+    parser.add_argument('--pop_mode', default=1, type=int, help='the mode of pop normalization')
 
     config = vars(parser.parse_args())
 
 
     if config['debias'] in [1,2,7]:
         trainer = Trainer(config)
-    elif config['debias'] in [3,9]:
+    elif config['debias'] in [3]:
         trainer = Trainer_Resample(config)
     elif config['debias'] in [4]:
         trainer = Trainer_MixNeg(config)
-    elif config['debias'] in [5]:
-        trainer = Trainer_WithLast(config)
-    elif config['debias'] in [6]:
-        trainer = Trainer_Re_WithLast(config)
     elif config['debias'] in [8]:
         trainer = Trainer_Cache(config)
     else:
