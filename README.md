@@ -1,4 +1,5 @@
 # Implementation for BIR and XIR
+Cache-Augmented Inbatch Importance Resampling for Training Recommender Retriever, NeurIPS 2022
 
 
 ## Datasets
